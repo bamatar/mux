@@ -22,6 +22,16 @@ func (f HandlerFunc) Handle(ctx *Context) error {
 // ErrorHandler processes handler errors
 type ErrorHandler func(ctx *Context, err error)
 
+var defaultNotFound handler = func(ctx *Context) error {
+	// TODO: implement 404 handler
+	return nil
+}
+
+var defaultMethodNotAllowed handler = func(ctx *Context) error {
+	// TODO: implement 405 handler
+	return nil
+}
+
 // ServeHTTP handles the request lifecycle
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := &Context{}
