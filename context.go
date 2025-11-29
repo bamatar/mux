@@ -192,11 +192,87 @@ func (c *Context) ContentType() string {
 	return ct
 }
 
-// Response
+// Status Response
+
+// Status writes a status code with empty body
+func (c *Context) Status(code int) error {
+	return c.Blob(code, "", nil)
+}
+
+// NoContent writes 204 No Content
+func (c *Context) NoContent() error {
+	return c.Blob(http.StatusNoContent, "", nil)
+}
+
+// JSON helpers
 
 // JSON writes a JSON response
 func (c *Context) JSON(status int, v any) error {
-	c.w.Header().Set("Content-Type", MIMEApplicationJSON)
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return c.Blob(status, MIMEApplicationJSON, data)
+}
+
+// OK writes 200 JSON response
+func (c *Context) OK(v any) error {
+	return c.JSON(http.StatusOK, v)
+}
+
+// Created writes 201 JSON response
+func (c *Context) Created(v any) error {
+	return c.JSON(http.StatusCreated, v)
+}
+
+// BadRequest writes 400 JSON response
+func (c *Context) BadRequest(v any) error {
+	return c.JSON(http.StatusBadRequest, v)
+}
+
+// Unauthorized writes 401 JSON response
+func (c *Context) Unauthorized(v any) error {
+	return c.JSON(http.StatusUnauthorized, v)
+}
+
+// Forbidden writes 403 JSON response
+func (c *Context) Forbidden(v any) error {
+	return c.JSON(http.StatusForbidden, v)
+}
+
+// NotFound writes 404 JSON response
+func (c *Context) NotFound(v any) error {
+	return c.JSON(http.StatusNotFound, v)
+}
+
+// InternalServerError writes 500 JSON response
+func (c *Context) InternalServerError(v any) error {
+	return c.JSON(http.StatusInternalServerError, v)
+}
+
+// Response
+
+// String writes a plain text response
+func (c *Context) String(status int, s string) error {
+	return c.Blob(status, MIMETextPlain, []byte(s))
+}
+
+// HTML writes an HTML response
+func (c *Context) HTML(status int, html string) error {
+	return c.Blob(status, MIMETextHTML, []byte(html))
+}
+
+// Blob writes raw bytes with content type
+func (c *Context) Blob(status int, contentType string, data []byte) error {
+	if contentType != "" {
+		c.w.Header().Set("Content-Type", contentType)
+	}
+
 	c.w.WriteHeader(status)
-	return json.NewEncoder(c.w).Encode(v)
+
+	if len(data) > 0 {
+		_, err := c.w.Write(data)
+		return err
+	}
+	return nil
 }
