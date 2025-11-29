@@ -34,7 +34,7 @@ var defaultMethodNotAllowed handler = func(ctx *Context) error {
 
 // ServeHTTP handles the request lifecycle
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := &Context{}
+	ctx := &Context{w: w, r: r}
 	if err := h(ctx); err != nil {
 		// TODO: handle error
 	}
