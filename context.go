@@ -245,6 +245,11 @@ func (c *Context) NotFound(v any) error {
 	return c.JSON(http.StatusNotFound, v)
 }
 
+// MethodNotAllowed writes 405 JSON response
+func (c *Context) MethodNotAllowed(v any) error {
+	return c.JSON(http.StatusMethodNotAllowed, v)
+}
+
 // InternalServerError writes 500 JSON response
 func (c *Context) InternalServerError(v any) error {
 	return c.JSON(http.StatusInternalServerError, v)

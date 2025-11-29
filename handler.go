@@ -1,41 +1,34 @@
 package mux
 
 import (
+	"log"
 	"net/http"
 )
 
 // Handler handles HTTP requests
-type Handler interface {
-	Handle(ctx *Context) error
-}
-
-// handler adapts Handler to http.Handler
-type handler func(ctx *Context) error
-
-// HandlerFunc allows using functions as handlers
-type HandlerFunc func(ctx *Context) error
-
-func (f HandlerFunc) Handle(ctx *Context) error {
-	return f(ctx)
-}
+type Handler func(c *Context) error
 
 // ErrorHandler processes handler errors
 type ErrorHandler func(ctx *Context, err error)
 
-var defaultNotFound handler = func(ctx *Context) error {
-	// TODO: implement 404 handler
-	return nil
+var defaultNotFound Handler = func(c *Context) error {
+	return c.NotFound(M{"error": "not found"})
 }
 
-var defaultMethodNotAllowed handler = func(ctx *Context) error {
-	// TODO: implement 405 handler
-	return nil
+var defaultMethodNotAllowed Handler = func(c *Context) error {
+	return c.MethodNotAllowed(M{"error": "method not allowed"})
 }
 
-// ServeHTTP handles the request lifecycle
-func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := &Context{w: w, r: r}
-	if err := h(ctx); err != nil {
-		// TODO: handle error
+var defaultErrorHandler ErrorHandler = func(c *Context, err error) {
+	response := M{
+		"error":   "internal server error",
+		"details": err.Error(),
 	}
+	if err := c.InternalServerError(response); err != nil {
+		log.Printf("mux: failed to write error response: %v", err)
+	}
+}
+
+func (h Handler) ServeHTTP(http.ResponseWriter, *http.Request) {
+	panic("mux: Handler.ServeHTTP should not be called directly")
 }

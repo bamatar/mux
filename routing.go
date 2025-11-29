@@ -26,10 +26,13 @@ type Router struct {
 	allowed allowed
 
 	// notFound handles 404 responses
-	notFound handler
+	notFound Handler
 
 	// methodNotAllowed handles 405 responses
-	methodNotAllowed handler
+	methodNotAllowed Handler
+
+	// errorHandler handles returned errors
+	errorHandler ErrorHandler
 }
 
 // New creates a router
@@ -40,6 +43,7 @@ func New() *Router {
 		root:             true,
 		allowed:          make(allowed),
 		notFound:         defaultNotFound,
+		errorHandler:     defaultErrorHandler,
 		methodNotAllowed: defaultMethodNotAllowed,
 	}
 }
@@ -52,18 +56,24 @@ func (r *Router) Group(prefix string) *Router {
 		prefix:           r.prefix + prefix,
 		allowed:          r.allowed,
 		notFound:         r.notFound,
+		errorHandler:     r.errorHandler,
 		methodNotAllowed: r.methodNotAllowed,
 	}
 }
 
 // SetNotFound sets the handler for 404 responses
 func (r *Router) SetNotFound(h Handler) {
-	r.notFound = h.Handle
+	r.notFound = h
 }
 
 // SetMethodNotAllowed sets the handler for 405 responses
 func (r *Router) SetMethodNotAllowed(h Handler) {
-	r.methodNotAllowed = h.Handle
+	r.methodNotAllowed = h
+}
+
+// SetErrorHandler sets the error handler
+func (r *Router) SetErrorHandler(h ErrorHandler) {
+	r.errorHandler = h
 }
 
 // GET registers a handler for GET requests
@@ -94,7 +104,7 @@ func (r *Router) PATCH(pattern string, h Handler) {
 // handle registers a handler for the method and path
 func (r *Router) handle(method, path string, h Handler) {
 	pattern := r.prefix + path
-	r.mux.Handle(method+" "+pattern, handler(h.Handle))
+	r.mux.Handle(method+" "+pattern, h)
 
 	// Register to bare once per pattern for 405 detection
 	if r.allowed[pattern] == nil {
@@ -109,20 +119,26 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		panic("mux: cannot serve from group router")
 	}
 
+	c := &Context{w: w, r: req}
 	h, pattern := r.mux.Handler(req)
-	if pattern != "" {
-		h.ServeHTTP(w, req)
-		return
+
+	// unmatched route
+	if pattern == "" {
+		_, pattern = r.bare.Handler(req)
+		methods, ok := r.allowed[pattern]
+
+		// 404
+		h = r.notFound
+
+		// 405
+		if ok {
+			w.Header().Set("Allow", strings.Join(methods, ", "))
+			h = r.methodNotAllowed
+		}
 	}
 
-	// 405
-	_, pattern = r.bare.Handler(req)
-	if methods, ok := r.allowed[pattern]; ok {
-		w.Header().Set("Allow", strings.Join(methods, ", "))
-		r.methodNotAllowed.ServeHTTP(w, req)
-		return
+	// execute handler
+	if err := h.(Handler)(c); err != nil {
+		r.errorHandler(c, err)
 	}
-
-	// 404
-	r.notFound.ServeHTTP(w, req)
 }

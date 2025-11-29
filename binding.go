@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+type M map[string]any
+
 // decodeJSON parses JSON request body into v
 func decodeJSON(c *Context, v any) error {
 	// limit request body to 1MB
