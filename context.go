@@ -84,9 +84,16 @@ func (c *Context) SetHeader(key, value string) {
 
 // Cookies
 
-// Cookie returns a request cookie by name
-func (c *Context) Cookie(name string) (*http.Cookie, error) {
-	return c.r.Cookie(name)
+// Cookie returns a request cookie value by name
+func (c *Context) Cookie(name string, fallback ...string) string {
+	cookie, err := c.r.Cookie(name)
+	if err != nil && len(fallback) > 0 {
+		return fallback[0]
+	}
+	if cookie == nil {
+		return ""
+	}
+	return cookie.Value
 }
 
 // SetCookie adds a cookie to the response
