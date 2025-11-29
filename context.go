@@ -3,6 +3,8 @@ package mux
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -160,10 +162,23 @@ func (c *Context) GetBool(key string) bool {
 
 // Body parsing
 
+// Body returns the raw request body
+func (c *Context) Body() ([]byte, error) {
+	return io.ReadAll(c.r.Body)
+}
+
 // Bind decodes request body into v with auto-detect content type
 func (c *Context) Bind(v any) error {
-	// TODO: auto-detect based on Content-Type
-	return nil
+	switch c.ContentType() {
+	case MIMEApplicationXML, MIMETextXML:
+		// TODO: implement decodeXML(c, v)
+		return nil
+	case MIMEApplicationForm, MIMEMultipartForm:
+		// TODO: implement decodeForm(c, v)
+		return nil
+	default:
+		return decodeJSON(c, v)
+	}
 }
 
 // FormValue returns a form field by name
@@ -171,11 +186,17 @@ func (c *Context) FormValue(name string) string {
 	return c.r.FormValue(name)
 }
 
+// ContentType returns the parsed media type from Content-Type header
+func (c *Context) ContentType() string {
+	ct, _, _ := mime.ParseMediaType(c.r.Header.Get("Content-Type"))
+	return ct
+}
+
 // Response
 
 // JSON writes a JSON response
 func (c *Context) JSON(status int, v any) error {
-	c.w.Header().Set("Content-Type", "application/json")
+	c.w.Header().Set("Content-Type", MIMEApplicationJSON)
 	c.w.WriteHeader(status)
 	return json.NewEncoder(c.w).Encode(v)
 }
