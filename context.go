@@ -281,3 +281,15 @@ func (c *Context) Blob(status int, contentType string, data []byte) error {
 	}
 	return nil
 }
+
+func (c *Context) attach(w http.ResponseWriter, r *http.Request) {
+	c.w = w
+	c.r = r
+}
+
+func (c *Context) detach() {
+	c.w = nil
+	c.r = nil
+	clear(c.locals)
+	c.locals = c.locals[:0]
+}

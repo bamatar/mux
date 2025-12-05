@@ -1,79 +1,63 @@
 package mux
 
 import (
+	"fmt"
+	"log"
 	"net/http"
-	"strings"
 )
 
-// allowed maps paths to their registered methods
-type allowed map[string][]string
+// Handler handles HTTP requests
+type Handler func(c *Context) error
+
+// ErrorHandler processes handler errors
+type ErrorHandler func(c *Context, err error)
 
 // Router wraps http.ServeMux with error handling
 type Router struct {
-	// mux routes with method prefix
+	ctx pool[Context]
 	mux *http.ServeMux
 
-	// bare routes without method for 405 detection
-	bare *http.ServeMux
-
-	// root is true for root router, false for groups
-	root bool
-
-	// prefix is the path prefix for all routes
-	prefix string
-
-	// allowed maps patterns to their registered methods
-	allowed allowed
-
-	// notFound handles 404 responses
-	notFound Handler
-
-	// methodNotAllowed handles 405 responses
-	methodNotAllowed Handler
-
-	// errorHandler handles returned errors
-	errorHandler ErrorHandler
+	// callbacks
+	on404 http.Handler
+	on405 http.Handler
+	onErr ErrorHandler
 }
 
 // New creates a router
 func New() *Router {
-	return &Router{
-		mux:              http.NewServeMux(),
-		bare:             http.NewServeMux(),
-		root:             true,
-		allowed:          make(allowed),
-		notFound:         defaultNotFound,
-		errorHandler:     defaultErrorHandler,
-		methodNotAllowed: defaultMethodNotAllowed,
-	}
+
+	r := new(Router)
+	r.ctx = pool[Context]{}
+	r.mux = http.NewServeMux()
+
+	r.On404(func(c *Context) error {
+		return c.NotFound(M{"error": "not found"})
+	})
+
+	r.On405(func(c *Context) error {
+		return c.MethodNotAllowed(M{"error": "method not allowed"})
+	})
+
+	r.OnErr(func(c *Context, err error) {
+		_ = c.InternalServerError(M{"error": "internal server error", "message": err.Error()})
+	})
+
+	return r
 }
 
-// Group creates a router with a prefix
-func (r *Router) Group(prefix string) *Router {
-	return &Router{
-		mux:              r.mux,
-		bare:             r.bare,
-		prefix:           r.prefix + prefix,
-		allowed:          r.allowed,
-		notFound:         r.notFound,
-		errorHandler:     r.errorHandler,
-		methodNotAllowed: r.methodNotAllowed,
-	}
+// On404 sets the handler for 404 responses
+func (r *Router) On404(h Handler) {
+	r.on404 = r.handler(h)
 }
 
-// SetNotFound sets the handler for 404 responses
-func (r *Router) SetNotFound(h Handler) {
-	r.notFound = h
+// On405 sets the handler for 405 responses
+func (r *Router) On405(h Handler) {
+	r.on405 = r.handler(h)
 }
 
-// SetMethodNotAllowed sets the handler for 405 responses
-func (r *Router) SetMethodNotAllowed(h Handler) {
-	r.methodNotAllowed = h
-}
-
-// SetErrorHandler sets the error handler
-func (r *Router) SetErrorHandler(h ErrorHandler) {
-	r.errorHandler = h
+// OnErr sets the error handler
+func (r *Router) OnErr(h ErrorHandler) {
+	r.onErr = h
 }
 
 // GET registers a handler for GET requests
@@ -102,43 +86,65 @@ func (r *Router) PATCH(pattern string, h Handler) {
 }
 
 // handle registers a handler for the method and path
-func (r *Router) handle(method, path string, h Handler) {
-	pattern := r.prefix + path
-	r.mux.Handle(method+" "+pattern, h)
+func (r *Router) handle(method, pattern string, h Handler) {
+	r.mux.Handle(method+" "+pattern, r.handler(h))
+}
 
-	// Register to bare once per pattern for 405 detection
-	if r.allowed[pattern] == nil {
-		r.bare.Handle(pattern, http.NotFoundHandler())
+// safelyHandleError calls the error handler with panic recovery
+func (r *Router) safelyHandleError(c *Context, err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			log.Printf("mux: panic in error handler: %v", e)
+		}
+	}()
+	r.onErr(c, err)
+}
+
+// handler wraps a Handler into http.HandlerFunc with context pooling and panic recovery
+func (r *Router) handler(handlerFunc Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		// acquire context
+		c := r.ctx.get()
+		c.attach(w, req)
+
+		defer func() {
+			if err := recover(); err != nil {
+				r.safelyHandleError(c, fmt.Errorf("panic: %v", err))
+			}
+
+			// release context
+			c.detach()
+			r.ctx.put(c)
+		}()
+
+		// execute handler
+		if err := handlerFunc(c); err != nil {
+			r.safelyHandleError(c, err)
+		}
 	}
-
-	r.allowed[pattern] = append(r.allowed[pattern], method)
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if !r.root {
-		panic("mux: cannot serve from group router")
+	h, p := r.mux.Handler(req)
+
+	if p != "" {
+		// Route matched. Delegate to mux which sets path values
+		// before calling the handler.
+		r.mux.ServeHTTP(w, req)
+		return
 	}
 
-	c := &Context{w: w, r: req}
-	h, pattern := r.mux.Handler(req)
+	// No route matched. The mux returns an internal handler that would
+	// write 404 or 405. used responder as a fake writer to capture the
+	// status without sending anything to the client, then substitute
+	// our custom error handler.
+	rsp := responder{ResponseWriter: w}
+	h.ServeHTTP(&rsp, req)
 
-	// unmatched route
-	if pattern == "" {
-		_, pattern = r.bare.Handler(req)
-		methods, ok := r.allowed[pattern]
-
-		// 404
-		h = r.notFound
-
-		// 405
-		if ok {
-			w.Header().Set("Allow", strings.Join(methods, ", "))
-			h = r.methodNotAllowed
-		}
+	if rsp.status == http.StatusMethodNotAllowed {
+		r.on405.ServeHTTP(w, req)
+		return
 	}
 
-	// execute handler
-	if err := h.(Handler)(c); err != nil {
-		r.errorHandler(c, err)
-	}
+	r.on404.ServeHTTP(w, req)
 }
