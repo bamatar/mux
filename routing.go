@@ -9,6 +9,10 @@ import (
 // Handler handles HTTP requests
 type Handler func(c *Context) error
 
+// Middleware wraps handler execution
+
+type Middleware func(next Handler) Handler
+
 // ErrorHandler processes handler errors
 type ErrorHandler func(c *Context, err error)
 
@@ -16,6 +20,7 @@ type ErrorHandler func(c *Context, err error)
 type Router struct {
 	ctx pool[Context]
 	mux *http.ServeMux
+	mws []Middleware
 
 	// callbacks
 	on404 http.Handler
@@ -60,6 +65,11 @@ func (r *Router) OnErr(h ErrorHandler) {
 	r.onErr = h
 }
 
+// Use adds middleware to the router
+func (r *Router) Use(middlewares ...Middleware) {
+	r.mws = append(r.mws, middlewares...)
+}
+
 // GET registers a handler for GET requests
 func (r *Router) GET(pattern string, h Handler) {
 	r.handle("GET", pattern, h)
@@ -87,6 +97,9 @@ func (r *Router) PATCH(pattern string, h Handler) {
 
 // handle registers a handler for the method and path
 func (r *Router) handle(method, pattern string, h Handler) {
+	for i := len(r.mws) - 1; i >= 0; i-- {
+		h = r.mws[i](h)
+	}
 	r.mux.Handle(method+" "+pattern, r.handler(h))
 }
 
