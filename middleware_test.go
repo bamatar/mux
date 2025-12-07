@@ -118,3 +118,105 @@ func TestLoggerDefault(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// RequestID
+// -----------------------------------------------------------------------------
+
+func TestRequestID(t *testing.T) {
+	r := New()
+	r.Use(RequestID())
+	r.GET("/test", func(c *Context) error {
+		return c.OK(nil)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	id := rec.Header().Get("X-Request-ID")
+	if id == "" {
+		t.Error("expected X-Request-ID header")
+	}
+	if len(id) != 32 { // 16 bytes = 32 hex chars
+		t.Errorf("expected 32 char ID, got %d", len(id))
+	}
+}
+
+func TestRequestIDReusesExisting(t *testing.T) {
+	r := New()
+	r.Use(RequestID())
+	r.GET("/test", func(c *Context) error {
+		return c.OK(nil)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("X-Request-ID", "existing-id-123")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	id := rec.Header().Get("X-Request-ID")
+	if id != "existing-id-123" {
+		t.Errorf("expected existing-id-123, got %s", id)
+	}
+}
+
+func TestRequestIDCustomHeader(t *testing.T) {
+	r := New()
+	r.Use(RequestID(RequestIDConfig{Header: "X-Trace-ID"}))
+	r.GET("/test", func(c *Context) error {
+		return c.OK(nil)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Header().Get("X-Trace-ID") == "" {
+		t.Error("expected X-Trace-ID header")
+	}
+	if rec.Header().Get("X-Request-ID") != "" {
+		t.Error("should not set X-Request-ID")
+	}
+}
+
+func TestRequestIDCustomGenerator(t *testing.T) {
+	r := New()
+	r.Use(RequestID(RequestIDConfig{
+		Generator: func() string { return "custom-id" },
+	}))
+	r.GET("/test", func(c *Context) error {
+		return c.OK(nil)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	id := rec.Header().Get("X-Request-ID")
+	if id != "custom-id" {
+		t.Errorf("expected custom-id, got %s", id)
+	}
+}
+
+func TestRequestIDInContext(t *testing.T) {
+	r := New()
+	r.Use(RequestID())
+
+	var ctxID string
+	r.GET("/test", func(c *Context) error {
+		ctxID = c.GetString("X-Request-ID")
+		return c.OK(nil)
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if ctxID == "" {
+		t.Error("expected request ID in context")
+	}
+	if ctxID != rec.Header().Get("X-Request-ID") {
+		t.Error("context ID should match header")
+	}
+}
