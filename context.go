@@ -11,7 +11,7 @@ import (
 )
 
 type Context struct {
-	w http.ResponseWriter
+	w *ResponseWriter
 	r *http.Request
 
 	// request-scoped storage
@@ -283,7 +283,7 @@ func (c *Context) Blob(status int, contentType string, data []byte) error {
 }
 
 func (c *Context) attach(w http.ResponseWriter, r *http.Request) {
-	c.w = w
+	c.w = &ResponseWriter{ResponseWriter: w}
 	c.r = r
 }
 
